@@ -2,11 +2,14 @@ package feishu
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
 	lark "github.com/larksuite/oapi-sdk-go/v3"
+	larkcore "github.com/larksuite/oapi-sdk-go/v3/core"
 	larkdrive "github.com/larksuite/oapi-sdk-go/v3/service/drive/v1"
 )
 
@@ -15,11 +18,17 @@ const (
 	maxDriveFileCommentPageSize          = 100
 	defaultDriveFileCommentReplyPageSize = 50
 	readDriveFileCommentsTimeout         = 30 * time.Second
+	replyDriveFileCommentTimeout         = 30 * time.Second
 	driveFileCommentStatsScopePage       = "returned_comments_page"
+	maxDriveFileCommentReplyRunes        = 6000
 )
 
 type DriveFileCommentReader interface {
 	ReadDriveFileComments(context.Context, DriveFileCommentReadRequest) (DriveFileCommentReadResult, error)
+}
+
+type DriveFileCommentReplyWriter interface {
+	ReplyDriveFileComment(context.Context, DriveFileCommentReplyRequest) (DriveFileCommentReplyResult, error)
 }
 
 type DriveFileCommentReadRequest struct {
@@ -28,6 +37,38 @@ type DriveFileCommentReadRequest struct {
 	FileType  string
 	PageToken string
 	PageSize  int
+}
+
+type DriveFileCommentReplyRequest struct {
+	GatewayID string
+	FileToken string
+	FileType  string
+	CommentID string
+	Text      string
+}
+
+type DriveFileCommentReplyResult struct {
+	GatewayID  string `json:"gateway_id"`
+	FileToken  string `json:"file_token"`
+	FileType   string `json:"file_type"`
+	CommentID  string `json:"comment_id"`
+	ReplyCount int    `json:"reply_count"`
+}
+
+type createDriveFileCommentReplyReqBody struct {
+	Content *larkdrive.ReplyContent `json:"content,omitempty"`
+}
+
+type createDriveFileCommentReplyResp struct {
+	*larkcore.ApiResp `json:"-"`
+	larkcore.CodeError
+	Data *struct {
+		ReplyID string `json:"reply_id,omitempty"`
+	} `json:"data,omitempty"`
+}
+
+func (resp *createDriveFileCommentReplyResp) Success() bool {
+	return resp != nil && resp.Code == 0
 }
 
 type DriveFileCommentReadResult struct {
@@ -79,7 +120,9 @@ const (
 	DriveFileCommentReadErrorGatewayNotRunning DriveFileCommentReadErrorCode = "gateway_not_running"
 	DriveFileCommentReadErrorInvalidFileType   DriveFileCommentReadErrorCode = "invalid_file_type"
 	DriveFileCommentReadErrorListFailed        DriveFileCommentReadErrorCode = "list_failed"
+	DriveFileCommentReadErrorGetFailed         DriveFileCommentReadErrorCode = "get_failed"
 	DriveFileCommentReadErrorReplyListFailed   DriveFileCommentReadErrorCode = "reply_list_failed"
+	DriveFileCommentReadErrorCreateFailed      DriveFileCommentReadErrorCode = "create_failed"
 )
 
 type DriveFileCommentReadError struct {
@@ -189,6 +232,170 @@ func (g *LiveGateway) ReadDriveFileComments(ctx context.Context, req DriveFileCo
 	return result, nil
 }
 
+func (g *LiveGateway) ReplyDriveFileComment(ctx context.Context, req DriveFileCommentReplyRequest) (DriveFileCommentReplyResult, error) {
+	ctx, cancel := newFeishuTimeoutContext(ctx, replyDriveFileCommentTimeout)
+	defer cancel()
+
+	fileToken := strings.TrimSpace(req.FileToken)
+	fileType := normalizeDriveFileCommentFileType(req.FileType)
+	commentID := strings.TrimSpace(req.CommentID)
+	chunks := splitDriveFileCommentReplyText(req.Text)
+	result := DriveFileCommentReplyResult{
+		GatewayID: g.config.GatewayID,
+		FileToken: fileToken,
+		FileType:  fileType,
+		CommentID: commentID,
+	}
+	if gatewayID := normalizeGatewayID(req.GatewayID); gatewayID != "" && gatewayID != g.config.GatewayID {
+		return result, &DriveFileCommentReadError{
+			Code: DriveFileCommentReadErrorGatewayNotRunning,
+			Err:  fmt.Errorf("reply drive comment failed: gateway mismatch: request=%s gateway=%s", gatewayID, g.config.GatewayID),
+		}
+	}
+	if !isSupportedDriveFileCommentFileType(fileType) {
+		return result, &DriveFileCommentReadError{
+			Code: DriveFileCommentReadErrorInvalidFileType,
+			Err:  fmt.Errorf("reply drive comment failed: unsupported file_type %q", strings.TrimSpace(req.FileType)),
+		}
+	}
+	if fileToken == "" || commentID == "" {
+		return result, &DriveFileCommentReadError{
+			Code: DriveFileCommentReadErrorCreateFailed,
+			Err:  fmt.Errorf("reply drive comment failed: missing file_token or comment_id"),
+		}
+	}
+	if len(chunks) == 0 {
+		return result, nil
+	}
+	for _, chunk := range chunks {
+		resp, err := DoSDK(ctx, g.broker, CallSpec{
+			GatewayID: g.config.GatewayID,
+			API:       "drive.v1.file_comment_reply.create",
+			Class:     CallClassDrive,
+			Priority:  CallPriorityInteractive,
+			ResourceKey: FeishuResourceKey{
+				DocToken: fileToken,
+			},
+			Retry:      RetryRateLimitOnly,
+			Permission: PermissionCooldownOnly,
+		}, func(callCtx context.Context, client *lark.Client) (*createDriveFileCommentReplyResp, error) {
+			apiResp, err := client.Do(callCtx, &larkcore.ApiReq{
+				HttpMethod: http.MethodPost,
+				ApiPath:    "/open-apis/drive/v1/files/:file_token/comments/:comment_id/replies",
+				PathParams: larkcore.PathParams{
+					"file_token": fileToken,
+					"comment_id": commentID,
+				},
+				QueryParams: larkcore.QueryParams{
+					"file_type":    []string{fileType},
+					"user_id_type": []string{larkdrive.UserIdTypeUpdateFileCommentReplyOpenId},
+				},
+				Body: createDriveFileCommentReplyReqBody{
+					Content: driveFileCommentReplyContent(chunk),
+				},
+				SupportedAccessTokenTypes: []larkcore.AccessTokenType{larkcore.AccessTokenTypeTenant, larkcore.AccessTokenTypeUser},
+			})
+			if err != nil {
+				return nil, err
+			}
+			resp := &createDriveFileCommentReplyResp{ApiResp: apiResp}
+			if err := json.Unmarshal(apiResp.RawBody, resp); err != nil {
+				return resp, err
+			}
+			if !resp.Success() {
+				return nil, newAPIError("drive.v1.file_comment_reply.create", resp.ApiResp, resp.CodeError)
+			}
+			return resp, nil
+		})
+		if err != nil {
+			return result, &DriveFileCommentReadError{
+				Code: DriveFileCommentReadErrorCreateFailed,
+				Err:  fmt.Errorf("reply drive comment failed: %w", err),
+			}
+		}
+		if resp != nil {
+			result.ReplyCount++
+			g.rememberDriveCommentReply(fileType, fileToken, commentID, chunk)
+		}
+	}
+	return result, nil
+}
+
+func driveFileCommentReplyContent(text string) *larkdrive.ReplyContent {
+	return larkdrive.NewReplyContentBuilder().
+		Elements([]*larkdrive.ReplyElement{
+			larkdrive.NewReplyElementBuilder().
+				Type("text_run").
+				TextRun(larkdrive.NewTextRunBuilder().Text(text).Build()).
+				Build(),
+		}).
+		Build()
+}
+
+func (g *LiveGateway) getDriveFileCommentEntry(ctx context.Context, fileToken, fileType, commentID string) (*DriveFileCommentEntry, error) {
+	ctx, cancel := newFeishuTimeoutContext(ctx, readDriveFileCommentsTimeout)
+	defer cancel()
+
+	fileToken = strings.TrimSpace(fileToken)
+	fileType = normalizeDriveFileCommentFileType(fileType)
+	commentID = strings.TrimSpace(commentID)
+	if fileToken == "" || fileType == "" || commentID == "" {
+		return nil, nil
+	}
+	if !isSupportedDriveFileCommentFileType(fileType) {
+		return nil, &DriveFileCommentReadError{
+			Code: DriveFileCommentReadErrorInvalidFileType,
+			Err:  fmt.Errorf("read drive comment failed: unsupported file_type %q", fileType),
+		}
+	}
+	resp, err := DoSDK(ctx, g.broker, CallSpec{
+		GatewayID: g.config.GatewayID,
+		API:       "drive.v1.file_comment.get",
+		Class:     CallClassDrive,
+		Priority:  CallPriorityReadAssist,
+		ResourceKey: FeishuResourceKey{
+			DocToken: fileToken,
+		},
+		Retry:      RetryRateLimitOnly,
+		Permission: PermissionCooldownOnly,
+	}, func(callCtx context.Context, client *lark.Client) (*larkdrive.GetFileCommentResp, error) {
+		resp, err := client.Drive.V1.FileComment.Get(
+			callCtx,
+			larkdrive.NewGetFileCommentReqBuilder().
+				FileToken(fileToken).
+				CommentId(commentID).
+				FileType(fileType).
+				UserIdType(larkdrive.UserIdTypeGetFileCommentOpenId).
+				Build(),
+		)
+		if err != nil {
+			return resp, err
+		}
+		if !resp.Success() {
+			return nil, newAPIError("drive.v1.file_comment.get", resp.ApiResp, resp.CodeError)
+		}
+		return resp, nil
+	})
+	if err != nil {
+		return nil, &DriveFileCommentReadError{
+			Code: DriveFileCommentReadErrorGetFailed,
+			Err:  fmt.Errorf("read drive comment failed: %w", err),
+		}
+	}
+	if resp == nil || resp.Data == nil {
+		return nil, nil
+	}
+	entry := driveFileCommentEntryFromGetData(resp.Data)
+	if boolPtr(resp.Data.HasMore) {
+		extraReplies, err := g.listDriveFileCommentReplies(ctx, fileToken, fileType, commentID, strings.TrimSpace(stringPtr(resp.Data.PageToken)))
+		if err != nil {
+			return nil, err
+		}
+		entry.Replies = dedupeDriveFileCommentReplies(append(entry.Replies, extraReplies...))
+	}
+	return &entry, nil
+}
+
 func (g *LiveGateway) buildDriveFileCommentEntries(ctx context.Context, fileToken, fileType string, items []*larkdrive.FileComment) ([]DriveFileCommentEntry, error) {
 	if len(items) == 0 {
 		return nil, nil
@@ -217,6 +424,24 @@ func (g *LiveGateway) buildDriveFileCommentEntries(ctx context.Context, fileToke
 		})
 	}
 	return comments, nil
+}
+
+func driveFileCommentEntryFromGetData(data *larkdrive.GetFileCommentRespData) DriveFileCommentEntry {
+	if data == nil {
+		return DriveFileCommentEntry{}
+	}
+	return DriveFileCommentEntry{
+		CommentID:    strings.TrimSpace(stringPtr(data.CommentId)),
+		UserID:       strings.TrimSpace(stringPtr(data.UserId)),
+		CreateTime:   intValue(data.CreateTime),
+		UpdateTime:   intValue(data.UpdateTime),
+		IsSolved:     boolPtr(data.IsSolved),
+		SolvedTime:   intValue(data.SolvedTime),
+		SolverUserID: strings.TrimSpace(stringPtr(data.SolverUserId)),
+		IsWhole:      boolPtr(data.IsWhole),
+		Quote:        strings.TrimSpace(stringPtr(data.Quote)),
+		Replies:      flattenDriveFileCommentReplies(getFileCommentReplyListReplies(data)),
+	}
 }
 
 func (g *LiveGateway) collectDriveFileCommentReplies(ctx context.Context, fileToken, fileType, commentID string, item *larkdrive.FileComment) ([]DriveFileCommentReplyItem, error) {
@@ -288,6 +513,27 @@ func (g *LiveGateway) listDriveFileCommentReplies(ctx context.Context, fileToken
 			}
 		}
 	}
+}
+
+func splitDriveFileCommentReplyText(text string) []string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return nil
+	}
+	runes := []rune(text)
+	if len(runes) <= maxDriveFileCommentReplyRunes {
+		return []string{text}
+	}
+	chunks := make([]string, 0, (len(runes)/maxDriveFileCommentReplyRunes)+1)
+	for len(runes) > 0 {
+		limit := maxDriveFileCommentReplyRunes
+		if len(runes) < limit {
+			limit = len(runes)
+		}
+		chunks = append(chunks, strings.TrimSpace(string(runes[:limit])))
+		runes = runes[limit:]
+	}
+	return chunks
 }
 
 func flattenDriveFileCommentReplies(items []*larkdrive.FileCommentReply) []DriveFileCommentReplyItem {
@@ -377,6 +623,13 @@ func replyListReplies(item *larkdrive.FileComment) []*larkdrive.FileCommentReply
 		return nil
 	}
 	return item.ReplyList.Replies
+}
+
+func getFileCommentReplyListReplies(data *larkdrive.GetFileCommentRespData) []*larkdrive.FileCommentReply {
+	if data == nil || data.ReplyList == nil {
+		return nil
+	}
+	return data.ReplyList.Replies
 }
 
 func normalizeDriveFileCommentFileType(value string) string {

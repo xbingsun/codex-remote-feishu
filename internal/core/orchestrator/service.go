@@ -267,31 +267,31 @@ func (s *Service) ApplySurfaceAction(action control.Action) []eventcontract.Even
 	surface := s.ensureSurface(action)
 	action = s.resolveCatalogActionFromSurfaceContext(surface, action)
 	if blocked := s.rejectExpiredCommandEntry(surface, action); blocked != nil {
-		return s.filterEventsForSurfaceVisibility(blocked)
+		return s.finalizeSurfaceActionEvents(action, blocked)
 	}
 	s.pruneExpiredPathPicker(surface)
 	if surface.Abandoning {
 		switch action.Kind {
 		case control.ActionStatus:
-			return s.filterEventsForSurfaceVisibility([]eventcontract.Event{{Kind: eventcontract.KindSnapshot, SurfaceSessionID: surface.SurfaceSessionID, Snapshot: s.buildSnapshot(surface)}})
+			return s.finalizeSurfaceActionEvents(action, []eventcontract.Event{{Kind: eventcontract.KindSnapshot, SurfaceSessionID: surface.SurfaceSessionID, Snapshot: s.buildSnapshot(surface)}})
 		case control.ActionAutoWhipCommand:
-			return s.filterEventsForSurfaceVisibility(s.handleAutoWhipCommand(surface, action))
+			return s.finalizeSurfaceActionEvents(action, s.handleAutoWhipCommand(surface, action))
 		case control.ActionAutoContinueCommand:
-			return s.filterEventsForSurfaceVisibility(s.handleAutoContinueCommand(surface, action))
+			return s.finalizeSurfaceActionEvents(action, s.handleAutoContinueCommand(surface, action))
 		case control.ActionDetach:
-			return s.filterEventsForSurfaceVisibility(notice(surface, "detach_pending", "当前仍在等待已发出的 turn 收尾，请稍后再试。"))
+			return s.finalizeSurfaceActionEvents(action, notice(surface, "detach_pending", "当前仍在等待已发出的 turn 收尾，请稍后再试。"))
 		default:
-			return s.filterEventsForSurfaceVisibility(notice(surface, "detach_pending", "当前会话正在等待已发出的 turn 收尾，暂时不能执行新的操作。"))
+			return s.finalizeSurfaceActionEvents(action, notice(surface, "detach_pending", "当前会话正在等待已发出的 turn 收尾，暂时不能执行新的操作。"))
 		}
 	}
 	if blocked := s.pendingHeadlessActionBlocked(surface, action); blocked != nil {
-		return s.filterEventsForSurfaceVisibility(blocked)
+		return s.finalizeSurfaceActionEvents(action, blocked)
 	}
 	if blocked := s.blockActionForActivePathPicker(surface, action); blocked != nil {
-		return s.filterEventsForSurfaceVisibility(blocked)
+		return s.finalizeSurfaceActionEvents(action, blocked)
 	}
 	if blocked := s.blockActionForActiveTargetPicker(surface, action); blocked != nil {
-		return s.filterEventsForSurfaceVisibility(blocked)
+		return s.finalizeSurfaceActionEvents(action, blocked)
 	}
 	s.noteAutoWhipAction(surface, action)
 	switch action.Kind {
@@ -303,19 +303,19 @@ func (s *Service) ApplySurfaceAction(action control.Action) []eventcontract.Even
 		s.recordInboundSurfaceMessage(surface, action.MessageID, state.SurfaceMessageKindCard)
 	}
 	if blocked := s.commandSupportBlocked(surface, action); blocked != nil {
-		return s.filterEventsForSurfaceVisibility(blocked)
+		return s.finalizeSurfaceActionEvents(action, blocked)
 	}
 	if replay := s.replayActivePendingRequestVisibility(surface, ""); len(replay) != 0 && action.Kind == control.ActionStatus {
 		events := []eventcontract.Event{{Kind: eventcontract.KindSnapshot, SurfaceSessionID: surface.SurfaceSessionID, Snapshot: s.buildSnapshot(surface)}}
 		events = append(events, replay...)
-		return s.filterEventsForSurfaceVisibility(events)
+		return s.finalizeSurfaceActionEvents(action, events)
 	}
 	if intent, ok := control.FeishuUIIntentFromAction(action); ok {
-		return s.filterEventsForSurfaceVisibility(s.applyFeishuUIIntent(surface, action, *intent))
+		return s.finalizeSurfaceActionEvents(action, s.applyFeishuUIIntent(surface, action, *intent))
 	}
 	s.applyCommandLauncherDisposition(surface, action)
 	if events, ok := s.boundDaemonCommandEvents(surface, action); ok {
-		return s.filterEventsForSurfaceVisibility(events)
+		return s.finalizeSurfaceActionEvents(action, events)
 	}
 	var events []eventcontract.Event
 	switch action.Kind {
@@ -451,7 +451,30 @@ func (s *Service) ApplySurfaceAction(action control.Action) []eventcontract.Even
 	default:
 		return nil
 	}
-	return s.filterEventsForSurfaceVisibility(events)
+	return s.finalizeSurfaceActionEvents(action, events)
+}
+
+func (s *Service) finalizeSurfaceActionEvents(action control.Action, events []eventcontract.Event) []eventcontract.Event {
+	return s.filterEventsForSurfaceVisibility(surfaceActionEventsWithSource(action, events))
+}
+
+func surfaceActionEventsWithSource(action control.Action, events []eventcontract.Event) []eventcontract.Event {
+	sourceMessageID := strings.TrimSpace(action.MessageID)
+	if sourceMessageID == "" || len(events) == 0 {
+		return events
+	}
+	sourceMessagePreview := strings.TrimSpace(action.Text)
+	for i := range events {
+		if strings.TrimSpace(events[i].SourceMessageID) == "" && strings.TrimSpace(events[i].Meta.SourceMessageID) == "" {
+			events[i].SourceMessageID = sourceMessageID
+			events[i].Meta.SourceMessageID = sourceMessageID
+		}
+		if sourceMessagePreview != "" && strings.TrimSpace(events[i].SourceMessagePreview) == "" && strings.TrimSpace(events[i].Meta.SourceMessagePreview) == "" {
+			events[i].SourceMessagePreview = sourceMessagePreview
+			events[i].Meta.SourceMessagePreview = sourceMessagePreview
+		}
+	}
+	return events
 }
 
 func (s *Service) boundDaemonCommandEvents(surface *state.SurfaceConsoleRecord, action control.Action) ([]eventcontract.Event, bool) {

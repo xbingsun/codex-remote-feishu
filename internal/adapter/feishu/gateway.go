@@ -56,10 +56,11 @@ type LiveGateway struct {
 	deleteReactionFn   func(context.Context, string, string) (*larkim.DeleteMessageReactionResp, error)
 	botTimeSensitiveFn func(context.Context, string, bool, []string) (*larkimv2.BotTimeSentiveFeedCardResp, error)
 
-	mu        sync.Mutex
-	stateHook func(GatewayState, error)
-	reactions map[string]string
-	messages  map[string]string
+	mu                  sync.Mutex
+	stateHook           func(GatewayState, error)
+	reactions           map[string]string
+	messages            map[string]string
+	driveCommentReplies map[string][]driveCommentReplySuppression
 }
 
 type gatewayMessage struct {
@@ -101,11 +102,12 @@ func NewLiveGateway(config LiveGatewayConfig) *LiveGateway {
 	config.GatewayID = normalizeGatewayID(config.GatewayID)
 	client := NewLarkClient(config.AppID, config.AppSecret)
 	gateway := &LiveGateway{
-		config:    config,
-		client:    client,
-		broker:    NewFeishuCallBroker(config.GatewayID, client),
-		reactions: map[string]string{},
-		messages:  map[string]string{},
+		config:              config,
+		client:              client,
+		broker:              NewFeishuCallBroker(config.GatewayID, client),
+		reactions:           map[string]string{},
+		messages:            map[string]string{},
+		driveCommentReplies: map[string][]driveCommentReplySuppression{},
 	}
 	gateway.downloadImageFn = gateway.downloadImage
 	gateway.downloadFileFn = gateway.downloadFile

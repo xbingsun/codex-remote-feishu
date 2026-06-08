@@ -72,6 +72,9 @@ func DefaultManifest() Manifest {
 					"drive:drive",
 					"base:app:create",
 					"bitable:app",
+					"docs:event:subscribe",
+					"docs:document.comment:read",
+					"docs:document.comment:create",
 					"im:datasync.feed_card.time_sensitive:write",
 					"im:message",
 					"im:message.group_at_msg:readonly",
@@ -112,6 +115,27 @@ func DefaultManifest() Manifest {
 				Feature:        "time_sensitive_indicator",
 				Required:       false,
 				DegradeMessage: "缺少该权限时，飞书客户端里的“等待你输入”提醒不会显示。",
+			},
+			{
+				Scope:          "docs:event:subscribe",
+				ScopeType:      "tenant",
+				Feature:        "doc_comment_mentions",
+				Required:       false,
+				DegradeMessage: "缺少该权限时，机器人无法订阅云文档评论事件。",
+			},
+			{
+				Scope:          "docs:document.comment:read",
+				ScopeType:      "tenant",
+				Feature:        "doc_comment_mentions",
+				Required:       false,
+				DegradeMessage: "缺少该权限时，机器人无法读取云文档评论线程上下文。",
+			},
+			{
+				Scope:          "docs:document.comment:create",
+				ScopeType:      "tenant",
+				Feature:        "doc_comment_mentions",
+				Required:       false,
+				DegradeMessage: "缺少该权限时，机器人无法把最终答复写回云文档评论。",
 			},
 			{
 				Scope:     "im:message",
@@ -195,6 +219,13 @@ func DefaultManifest() Manifest {
 				Required:       false,
 				DegradeMessage: "缺少该事件时，飞书里的机器人菜单快捷入口不可用。",
 			},
+			{
+				Event:          "drive.notice.comment_add_v1",
+				Purpose:        "处理云文档评论里 @ 机器人的新增评论或回复",
+				Feature:        "doc_comment_mentions",
+				Required:       false,
+				DegradeMessage: "缺少该事件时，机器人无法响应云文档评论里的 @。",
+			},
 		},
 		Callbacks: []CallbackRequirement{
 			{
@@ -220,13 +251,14 @@ func DefaultManifest() Manifest {
 					"点击“保存并申请开通”，再回到当前页面继续。",
 					"如果需要在单聊列表里标记“等待你输入”的机器人，保持 im:datasync.feed_card.time_sensitive:write 启用。",
 					"如果需要 Markdown 预览，保持 drive:drive 权限启用。",
+					"如果需要在云文档评论里 @ 机器人，保持 docs:event:subscribe、docs:document.comment:read 和 docs:document.comment:create 启用。",
 				},
 			},
 			{
 				Area: "事件订阅",
 				Items: []string{
 					"打开“事件与回调”页，在“订阅方式”里确认长连接并保存。",
-					"手工订阅 manifest 里的消息事件和菜单事件。",
+					"手工订阅 manifest 里的消息事件、菜单事件和云文档评论事件。",
 				},
 			},
 			{

@@ -51,6 +51,9 @@
         "drive:drive",
         "base:app:create",
         "bitable:app",
+        "docs:event:subscribe",
+        "docs:document.comment:read",
+        "docs:document.comment:create",
         "im:datasync.feed_card.time_sensitive:write",
         "im:message",
         "im:message.group_at_msg:readonly",
@@ -83,6 +86,10 @@
     {
       "event": "application.bot.menu_v6",
       "purpose": "处理机器人静态菜单里的阶段入口和高频快捷键，例如 menu/stop/steerall/new/reasoning/model/access。"
+    },
+    {
+      "event": "drive.notice.comment_add_v1",
+      "purpose": "处理云文档评论里 @ 机器人的新增评论或回复，并把 Codex 最终答复回写到同一条评论线程。"
     }
   ],
   "callback_subscriptions": [
@@ -109,7 +116,8 @@
         "开启 P2P 消息接收事件",
         "开启消息撤回事件",
         "开启消息 reaction 创建事件",
-        "开启机器人菜单点击事件"
+        "开启机器人菜单点击事件",
+        "开启云文档评论添加事件 drive.notice.comment_add_v1"
       ]
     },
     {
@@ -133,6 +141,13 @@
         "如果要启用 assistant 最终回复里的本地 .md 预览，推荐直接开通 drive:drive。",
         "当前实现会实际创建云空间目录、上传文件、查询文件链接，并给目录和文件增加协作者权限。",
         "如果不开通这部分权限，机器人主功能仍可用，但 .md 链接不会变成飞书预览链接。"
+      ]
+    },
+    {
+      "area": "云文档评论权限",
+      "items": [
+        "如果需要在云文档评论里 @ 机器人，开通 docs:event:subscribe、docs:document.comment:read 和 docs:document.comment:create。",
+        "订阅 drive.notice.comment_add_v1 后，机器人会读取触发评论线程，并把 Codex 的最终答复回复到同一条评论。"
       ]
     }
   ],

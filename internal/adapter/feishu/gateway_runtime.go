@@ -7,6 +7,7 @@ import (
 	"log"
 	"strings"
 
+	larkevent "github.com/larksuite/oapi-sdk-go/v3/event"
 	"github.com/larksuite/oapi-sdk-go/v3/event/dispatcher"
 	larkcallback "github.com/larksuite/oapi-sdk-go/v3/event/dispatcher/callback"
 	larkapplication "github.com/larksuite/oapi-sdk-go/v3/service/application/v6"
@@ -45,6 +46,9 @@ func (g *LiveGateway) Start(ctx context.Context, handler ActionHandler) error {
 			return nil
 		}
 		return handleGatewayEventAction(ctx, action, handler)
+	})
+	dispatch.OnCustomizedEvent(driveCommentNoticeEventType, func(ctx context.Context, event *larkevent.EventReq) error {
+		return g.handleDriveCommentNoticeEvent(ctx, event, handler)
 	})
 	return newGatewayWSRunner(g.config, dispatch, g.emitState).Run(ctx)
 }
@@ -141,6 +145,15 @@ func (g *LiveGateway) Apply(ctx context.Context, operations []Operation) error {
 
 func (g *LiveGateway) applyOne(ctx context.Context, operation *Operation) error {
 	switch operation.Kind {
+	case OperationReplyDriveComment:
+		_, err := g.ReplyDriveFileComment(ctx, DriveFileCommentReplyRequest{
+			GatewayID: operation.GatewayID,
+			FileToken: operation.FileToken,
+			FileType:  operation.FileType,
+			CommentID: operation.CommentID,
+			Text:      operation.Text,
+		})
+		return err
 	case OperationSendText:
 		msgType, content, err := sendTextPayload(*operation)
 		if err != nil {

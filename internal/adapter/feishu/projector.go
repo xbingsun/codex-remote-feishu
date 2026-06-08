@@ -15,14 +15,15 @@ import (
 type OperationKind string
 
 const (
-	OperationSendText         OperationKind = "send_text"
-	OperationSendCard         OperationKind = "send_card"
-	OperationUpdateCard       OperationKind = "update_card"
-	OperationSendImage        OperationKind = "send_image"
-	OperationDeleteMessage    OperationKind = "delete_message"
-	OperationAddReaction      OperationKind = "add_reaction"
-	OperationRemoveReaction   OperationKind = "remove_reaction"
-	OperationSetTimeSensitive OperationKind = "set_time_sensitive"
+	OperationSendText          OperationKind = "send_text"
+	OperationSendCard          OperationKind = "send_card"
+	OperationUpdateCard        OperationKind = "update_card"
+	OperationSendImage         OperationKind = "send_image"
+	OperationDeleteMessage     OperationKind = "delete_message"
+	OperationAddReaction       OperationKind = "add_reaction"
+	OperationRemoveReaction    OperationKind = "remove_reaction"
+	OperationSetTimeSensitive  OperationKind = "set_time_sensitive"
+	OperationReplyDriveComment OperationKind = "reply_drive_comment"
 )
 
 type Operation struct {
@@ -36,6 +37,9 @@ type Operation struct {
 	ReplyToMessageID     string
 	EmojiType            string
 	TimeSensitive        bool
+	FileToken            string
+	FileType             string
+	CommentID            string
 	Text                 string
 	AttentionText        string
 	AttentionUserID      string
@@ -109,6 +113,9 @@ func (p *Projector) ProjectEvent(chatID string, event eventcontract.Event) []Ope
 }
 
 func (p *Projector) projectEventBase(chatID string, event eventcontract.Event) []Operation {
+	if target, ok := parseDriveCommentSourceMessageID(firstNonEmpty(event.SourceMessageID, event.Meta.SourceMessageID)); ok {
+		return p.projectDriveCommentEvent(event, target)
+	}
 	switch payload := event.CanonicalPayload().(type) {
 	case eventcontract.SnapshotPayload:
 		elements := p.projectSnapshotElements(payload.Snapshot)
@@ -315,6 +322,9 @@ func (p *Projector) projectEventBase(chatID string, event eventcontract.Event) [
 	case eventcontract.ThreadHistoryPayload:
 		return p.projectThreadHistory(chatID, event, payload.View)
 	case eventcontract.PendingInputPayload:
+		if _, ok := parseDriveCommentSourceMessageID(strings.TrimSpace(payload.State.SourceMessageID)); ok {
+			return nil
+		}
 		var ops []Operation
 		if payload.State.QueueOn {
 			ops = append(ops, Operation{
@@ -427,6 +437,48 @@ func (p *Projector) projectBlock(gatewayID, surfaceSessionID, chatID, sourceMess
 	elements := p.finalBlockExtraElements(summary, turnDiffPreview, finalSummary)
 	title := finalCardTitle(sourceMessagePreview, block.KeepDefaultTitle)
 	return projectFinalReplyCards(gatewayID, surfaceSessionID, chatID, sourceMessageID, title, temporarySessionHeaderSubtitle(block.TemporarySessionLabel), body, elements)
+}
+
+func (p *Projector) projectDriveCommentEvent(event eventcontract.Event, target driveCommentTarget) []Operation {
+	switch payload := event.CanonicalPayload().(type) {
+	case eventcontract.BlockCommittedPayload:
+		if !payload.Block.Final {
+			return nil
+		}
+		body := payload.Block.Text
+		if payload.Block.Kind == render.BlockAssistantCode {
+			body = fenced(payload.Block.Language, payload.Block.Text)
+		}
+		return projectDriveCommentReplies(event.GatewayID, event.SurfaceSessionID, target, body)
+	case eventcontract.NoticePayload:
+		text := strings.TrimSpace(payload.Notice.Text)
+		if text == "" {
+			text = strings.TrimSpace(payload.Notice.Title)
+		}
+		return projectDriveCommentReplies(event.GatewayID, event.SurfaceSessionID, target, text)
+	default:
+		return nil
+	}
+}
+
+func projectDriveCommentReplies(gatewayID, surfaceSessionID string, target driveCommentTarget, text string) []Operation {
+	chunks := splitDriveFileCommentReplyText(text)
+	if len(chunks) == 0 {
+		return nil
+	}
+	ops := make([]Operation, 0, len(chunks))
+	for _, chunk := range chunks {
+		ops = append(ops, Operation{
+			Kind:             OperationReplyDriveComment,
+			GatewayID:        gatewayID,
+			SurfaceSessionID: surfaceSessionID,
+			FileToken:        target.FileToken,
+			FileType:         target.FileType,
+			CommentID:        target.CommentID,
+			Text:             chunk,
+		})
+	}
+	return ops
 }
 
 func finalCardTitle(sourceMessagePreview string, keepDefaultTitle bool) string {

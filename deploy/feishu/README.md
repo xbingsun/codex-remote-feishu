@@ -18,7 +18,7 @@
    - 选择“长连接”，点击保存
    - 配置 `card.action.trigger`
    - 当前版本不需要额外填写 HTTP 回调地址
-5. 打开“权限管理”，补齐模板里列出的消息、P2P 和 reaction 相关权限。
+5. 打开“权限管理”，补齐模板里列出的消息、P2P、reaction 和云文档评论相关权限。
    - 点击“批量导入/导出权限”
    - 粘贴模板中的 `scopes_import`
    - 点击“保存并申请开通”
@@ -81,6 +81,9 @@ alias 仍兼容，但不建议继续当成新的主展示入口：
 
 - `base:app:create`
 - `bitable:app`
+- `docs:event:subscribe`
+- `docs:document.comment:read`
+- `docs:document.comment:create`
 - `drive:drive`
 - `im:datasync.feed_card.time_sensitive:write`
 - `im:message`
@@ -107,13 +110,14 @@ alias 仍兼容，但不建议继续当成新的主展示入口：
 
 ### 2. 事件订阅
 
-当前实现依赖这 5 个事件：
+当前实现依赖这 6 个事件：
 
 - `im.message.receive_v1`
 - `im.message.recalled_v1`
 - `im.message.reaction.created_v1`
 - `im.message.reaction.deleted_v1`
 - `application.bot.menu_v6`
+- `drive.notice.comment_add_v1`
 
 进入事件列表前，先点击“订阅方式”，默认就是“长连接”，点击保存。
 
@@ -123,6 +127,7 @@ alias 仍兼容，但不建议继续当成新的主展示入口：
 - `im.message.reaction.deleted_v1` 负责在用户撤销 reaction 时同步撤销对应的反馈动作
 - `im.message.recalled_v1` 负责撤回尚未发送的排队输入，或取消 staged image
 - `application.bot.menu_v6` 负责静态 bot 菜单里的 `menu/stop/steerall/new/reasoning/model/access`
+- `drive.notice.comment_add_v1` 负责云文档评论里 @ 机器人的新增评论或回复
 
 ### 3. 回调配置
 
@@ -145,6 +150,17 @@ alias 仍兼容，但不建议继续当成新的主展示入口：
 如果你希望机器人在“等待你继续输入”时能在单聊列表里即时提示，还需要额外开通：
 
 - `im:datasync.feed_card.time_sensitive:write`
+
+## 云文档评论 @ bot 额外权限
+
+如果你希望在飞书云文档评论里 @ 机器人，并让 Codex 最终答复回到同一条评论线程，需要额外确认：
+
+- `docs:event:subscribe`
+- `docs:document.comment:read`
+- `docs:document.comment:create`
+- `drive.notice.comment_add_v1`
+
+评论事件会复用评论人的个人 surface，所以需要先在单聊里完成 workspace/thread 绑定。
 
 ## 文档预览额外权限
 
