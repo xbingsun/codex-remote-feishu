@@ -1,5 +1,11 @@
 # Codex Remote Feishu
 
+## 版本说明
+
+本项目 v0 版本参考并基于 [kxn/codex-remote-feishu](https://github.com/kxn/codex-remote-feishu)。
+
+v1 在 v0 的基础上增加了 bot 读取飞书云文档评论的能力：在云文档评论里 @ bot 后，bot 会读取对应评论线程上下文，把请求送入 Codex，并将最终答复回复回同一条评论线程。
+
 `codex-remote-feishu` 把一台机器上的 Codex 工作现场带到飞书，让你可以在飞书里接管工作区、切换 thread、继续对话、发图和停止当前 turn。
 
 使用说明 https://my.feishu.cn/docx/PTncdNBf1oS9N5xBikBcGi2enzc
@@ -59,6 +65,7 @@
 - 可在飞书里看到计划更新、工具调用、Web 搜索、命令执行等共享进度卡
 - 区分系统提示、过程消息和最终回复
 - 最终回复会直接回在触发它的那条消息下方
+- 在飞书云文档评论里 @ bot 时，可读取评论线程并把最终答复回复到同一条评论
 - 旧卡片、旧按钮和旧命令会明确提示已过期或已移除
 - 最终回复中的本地 `.md` 和单文件 `.html` 链接可自动替换成飞书云空间预览链接
 
