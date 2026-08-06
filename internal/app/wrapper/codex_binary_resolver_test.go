@@ -35,6 +35,46 @@ func TestResolveNormalCodexBinaryHealsVSCodePathToPATHCodex(t *testing.T) {
 	}
 }
 
+func TestResolveNormalCodexBinaryHealsMissingAbsolutePathToPATHCodex(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	pathDir := filepath.Join(home, "bin")
+	writeResolverExecutable(t, filepath.Join(pathDir, "codex"))
+	t.Setenv("PATH", pathDir)
+
+	stale := filepath.Join(home, "Applications", "Codex.app", "Contents", "Resources", "codex")
+	configPath := writeResolverConfig(t, home, stale)
+
+	got, err := resolveNormalCodexBinary(configPath, stale)
+	if err != nil {
+		t.Fatalf("resolveNormalCodexBinary: %v", err)
+	}
+	if got != "codex" {
+		t.Fatalf("resolved codex binary = %q, want codex", got)
+	}
+
+	loaded, err := config.LoadAppConfigAtPath(configPath)
+	if err != nil {
+		t.Fatalf("LoadAppConfigAtPath: %v", err)
+	}
+	if loaded.Config.Wrapper.CodexRealBinary != "codex" {
+		t.Fatalf("config codex real binary = %q, want codex", loaded.Config.Wrapper.CodexRealBinary)
+	}
+}
+
+func TestResolveNormalCodexBinaryRejectsMissingAbsolutePathWithoutFallback(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", filepath.Join(home, "empty-bin"))
+
+	stale := filepath.Join(home, "Applications", "Codex.app", "Contents", "Resources", "codex")
+	configPath := writeResolverConfig(t, home, stale)
+
+	if _, err := resolveNormalCodexBinary(configPath, stale); err == nil {
+		t.Fatal("expected resolveNormalCodexBinary to fail")
+	}
+}
+
 func TestResolveNormalCodexBinaryFallsBackToUsableVSCodeBundle(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

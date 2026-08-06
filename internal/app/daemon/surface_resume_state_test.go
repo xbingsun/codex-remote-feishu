@@ -1089,6 +1089,76 @@ func TestDaemonHeadlessRecoveryTickPersistsUpdatedResumeStateForRecoveredSurface
 	}
 }
 
+func TestDaemonDetachClearsPersistedResumeTargetBeforeKillingPendingHeadless(t *testing.T) {
+	stateDir := t.TempDir()
+	putSurfaceResumeStateForTest(t, stateDir, surfaceresume.Entry{
+		SurfaceSessionID:   "surface-1",
+		GatewayID:          "app-1",
+		ChatID:             "chat-1",
+		ActorUserID:        "user-1",
+		ProductMode:        "normal",
+		Backend:            "codex",
+		ResumeThreadID:     "thread-1",
+		ResumeThreadTitle:  "修复登录流程",
+		ResumeThreadCWD:    "/data/dl/droid",
+		ResumeWorkspaceKey: "/data/dl/droid",
+		ResumeRouteMode:    "pinned",
+		ResumeHeadless:     true,
+	})
+
+	app := newRestoreHintTestApp(stateDir)
+	app.startHeadless = func(relayruntime.HeadlessLaunchOptions) (int, error) {
+		return 4321, nil
+	}
+	recoveryEvents, result := app.service.TryAutoResumeHeadlessSurface("surface-1", orchestrator.SurfaceResumeAttempt{
+		ThreadID:       "thread-1",
+		ThreadTitle:    "修复登录流程",
+		ThreadCWD:      "/data/dl/droid",
+		WorkspaceKey:   "/data/dl/droid",
+		Backend:        agentproto.BackendCodex,
+		ResumeHeadless: true,
+	}, true)
+	if result.Status != orchestrator.SurfaceResumeStatusStarting {
+		t.Fatalf("expected headless recovery to start, got result=%#v events=%#v", result, recoveryEvents)
+	}
+	app.mu.Lock()
+	app.handleUIEventsLocked(context.Background(), recoveryEvents)
+	app.mu.Unlock()
+
+	snapshot := app.service.SurfaceSnapshot("surface-1")
+	if snapshot == nil || snapshot.PendingHeadless.InstanceID == "" {
+		t.Fatalf("expected pending headless recovery before detach, got %#v", snapshot)
+	}
+
+	targetPresentDuringKill := false
+	app.stopProcess = func(int, time.Duration) error {
+		entry, ok := app.surfaceResumeRuntime.store.Get("surface-1")
+		targetPresentDuringKill = ok && (entry.ResumeThreadID != "" || entry.ResumeWorkspaceKey != "" || entry.ResumeHeadless)
+		return nil
+	}
+	app.HandleAction(context.Background(), control.Action{
+		Kind:             control.ActionDetach,
+		GatewayID:        "app-1",
+		SurfaceSessionID: "surface-1",
+		ChatID:           "chat-1",
+		ActorUserID:      "user-1",
+	})
+
+	if targetPresentDuringKill {
+		t.Fatal("expected detach to clear persisted resume target before releasing the daemon lock for process termination")
+	}
+	entry := app.SurfaceResumeState("surface-1")
+	if entry == nil {
+		t.Fatal("expected detached surface preferences to remain persisted")
+	}
+	if entry.ResumeThreadID != "" || entry.ResumeWorkspaceKey != "" || entry.ResumeHeadless {
+		t.Fatalf("expected detached surface resume target to stay cleared, got %#v", entry)
+	}
+	if snapshot := app.service.SurfaceSnapshot("surface-1"); snapshot == nil || snapshot.PendingHeadless.InstanceID != "" {
+		t.Fatalf("expected pending headless recovery to be cleared, got %#v", snapshot)
+	}
+}
+
 func TestDaemonRestartRecoversPreparedWorkspaceResumeState(t *testing.T) {
 	t.Parallel()
 

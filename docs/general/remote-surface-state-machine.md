@@ -1,7 +1,8 @@
 # Remote Surface 核心状态机
 
 > Type: `general`
-> Updated: `2026-06-05`
+> Updated: `2026-08-06`
+> Change: 2026-08-06，`/detach` 取消 headless 恢复时，会在任何 daemon kill 释放 ingress 锁之前先清除持久化恢复目标与内存恢复运行态，避免已取消的恢复被后台 tick 再次拉起。
 > Summary: 当前实现同步了 workspace-aware headless 主链与 vscode 主链，并把当前 live 的 backend-aware 可见命令面收口到新的投影：`codex` 继续以 `workspace` 命令族作为主展示壳，`claude` 当前 live 实现也把 `switch_target` 收口到同一套 `/workspace` 父页与 `切换 / 从目录新建 / 从 GIT URL 新建 / 从 Worktree 新建 / 解除接管` 五个入口，`current_work` 继续保留 `/new` 等当前工作动作，`常用工具` 继续收口到 `/history` 与 `/sendfile`；`/list`、`/use`、裸 `/detach` 则退回 hidden + allow 兼容 alias。`send_settings` 则改成 backend 互斥入口：`codex headless` 可见 `/codexprovider`，`claude headless` 可见 `/claudeprofile`，`vscode` 两者都隐藏，且手动输入错误 backend 的命令也会显式拒绝。`/list` `/use` / target picker / workspace recency 全部只按当前 backend 过滤，且不再因为 surface/instance `ClaudeProfileID` 不同而隐藏 Claude workspace/session 候选；同时工作区一旦确定，`/workspace list` 与 alias `/list` 现在会把 `新建会话` 置顶并默认选中，`/use`、`/useall` 与锁定工作区的恢复 picker 则继续保留 `新建会话` fallback。2026-06-05 的补充是：headless auto-resume 的运行态只在真实恢复目标身份变化时重置 backoff / last notice，标题、更新时间等非目标元数据刷新不会把同一失败 episode 重新刷成新失败；auto-restore 启动的 managed headless 一旦连回，若 exact-thread 接管失败，也会立刻终止本轮 `PendingHeadless`、kill 这次拉起的 headless，并保留持久化恢复目标等待后续 backoff 重试。2026-05-31 的补充是：headless auto-resume 现在把“恢复 episode 的稳定失败根因”与“后续 retry 观测到的派生 busy/not_found 状态”分开记账；provider/profile/runtime 这类启动前失败会保留为本轮恢复的 canonical cause，并且只有在真正恢复成功或 target 改变后才会清空，因此后续 retry 不会再把用户提示改写成误导性的 workspace/thread busy，也不会对同一根因重复刷失败卡。2026-05-01 的新变化是：headless attach/reuse/restart/create/reject 已进一步收口成单一路径，visible 与 compatibility 继续拆层，但所有 consumer 现在都共享同一个 `desired surface contract vs observed instance contract` 解析核。结果是：
 > 1. visible 但 contract mismatch 的 workspace/session 仍然可见，不会再被 `/list`、`/use`、workspace recency、target picker 直接吞掉；
 > 2. 这些 mismatch 候选不会再假装“可直接接管”；
@@ -731,7 +732,7 @@ review mode 第一版当前不是新的 route state，而是挂在 surface 上�
 
 1. `starting` 时不能旁路 attach/use/follow/new。
 2. detached `/use` 触发的 preselected headless，在实例连上后会直接落到目标 thread，不会再进入手工 selecting。
-3. `/mode vscode` 与 `/detach` 都会主动取消当前恢复流程，并回到 detached 态；此外还有启动超时 watchdog。
+3. `/mode vscode` 与 `/detach` 都会主动取消当前恢复流程，并回到 detached 态；其中 `/detach` 会先清除持久化恢复目标和内存恢复运行态，再执行可能释放 ingress 锁的 daemon kill，确保后台 tick 无法从旧目标重建恢复流程。此外还有启动超时 watchdog。
 4. `PendingHeadless` 当前有三类产品语义：
    1. `Purpose=thread_restore`：显式 `/use` 一个需要后台恢复的 thread，或 auto-restore。
    2. `Purpose=fresh_workspace`：`/workspace new dir` 流程选了一个当前没有可复用实例的目录。
@@ -1399,7 +1400,7 @@ G1 PendingHeadlessStarting
   -- instance connected 且 pending.ThreadID != "" 且 auto-restore exact-thread 接管失败 --> kill headless + clear pending + R0 Detached + 单条恢复失败 notice
   -- instance connected 且 pending.ThreadID == "" 且也不是 fresh_workspace（仅历史兼容兜底） --> kill headless + generic notice + G0 None
   -- /mode codex|claude|vscode（目标 backend 或 ProductMode 发生变化） --> kill headless + clear persisted resume target + G0 None + R0 Detached(目标 mode/backend)
-  -- /detach --> kill headless + G0 None + R0 Detached
+  -- /detach --> clear persisted resume target + clear recovery runtime + kill headless + G0 None + R0 Detached
   -- Tick timeout --> kill headless + clear pending + detach if needed
 ```
 
@@ -1532,6 +1533,7 @@ detach 时额外保证：
 1. 未发送 queue item 会被丢弃。
 2. staged image / staged file 会被丢弃。
 3. request prompt / request capture 会被清空。
+4. 若 detach 取消的是 pending headless 恢复，持久化恢复目标与内存恢复运行态会在终止 wrapper 前先清空；即使终止过程短暂释放 ingress 锁，后台 tick 也不会再看到可重建的恢复目标。
 
 ### 5.6 transport degraded / reconnect / hard disconnect
 
@@ -1776,6 +1778,7 @@ retained-offline overlay 额外规则：
 39. **route / attach 上下文已经变化，但旧 workspace page / target picker / path picker / history / review picker 还要等“再点一次旧卡”才暴露失效，甚至出现第一次返回无效的假活状态**：已修复。当前 detach-like / route-change cleanup 会统一清掉 context-bound overlay runtime；只要仍有稳定 owner message，就会主动把旧卡封成失效态。若当前可见的是 target-picker-owned path picker 子步骤，则只 patch 这张可见子卡，隐藏父卡 runtime 静默清理；没有 anchor 的旧卡则继续按 callback fail-closed。
 40. **headless auto-resume 先因为 provider/profile/runtime 失败，再在后续 retry 上被 `workspace_busy` / `thread_busy` 覆盖成误导性根因，或每次 retry 都重复刷同一条失败卡**：已修复。当前恢复 runtime 会把“最新 retry 结果”和“本轮恢复的稳定失败根因”拆开记录；启动前失败会在真正恢复成功前一直保留为 canonical cause，后续派生 busy/not_found 只影响 backoff，不再改写用户提示；同一根因在同一恢复 episode 里也不会重复刷卡。
 41. **auto-restore 启动的 managed headless 已经连回，但 exact-thread 接管失败后，surface 仍保留 `PendingHeadless` 到启动超时，并且同一持久化目标的非目标元数据刷新会重置 daemon 侧失败节流，导致恢复失败提示反复刷屏**：已修复。当前连接后接管失败会立刻清掉本轮 pending、kill 这次拉起的 headless，并把缺 workspace/cwd 等接管失败归一到 `headless_restore_*` 恢复失败族；daemon 同步恢复运行态时只用真实恢复目标身份判断是否重置 backoff，标题/时间等元数据刷新不会让同一 episode 重新投影。
+42. **`/detach` 已清掉内存里的 `PendingHeadless`，但终止 wrapper 时 ingress 临时解锁，后台 tick 仍可能从尚未落盘清除的恢复目标再启动一次 headless**：已修复。当前 ingress 会在处理任何 detach daemon command 前先同步清除持久化恢复目标与恢复运行态，随后才允许 kill 路径释放锁；取消动作不再留下可被并发 tick 复活的恢复入口。
 
 当前审计范围内，未再发现“attach/use 成功后用户没有任何可恢复下一步”的 bug-grade 状态。
 

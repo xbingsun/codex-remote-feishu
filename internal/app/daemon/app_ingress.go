@@ -257,6 +257,15 @@ func (a *App) handleAction(ctx context.Context, action control.Action) *feishu.A
 		return inlineResult
 	}
 	events := a.applyIngressActionLocked(action)
+	var clearTargets map[string]bool
+	if a.shouldClearSurfaceResumeTargetLocked(action, before) {
+		clearTargets = map[string]bool{strings.TrimSpace(action.SurfaceSessionID): true}
+		// Detach may emit a daemon command that temporarily releases a.mu while
+		// terminating the managed wrapper. Remove the durable recovery target
+		// before that boundary so a concurrent recovery tick cannot recreate the
+		// launch that the user just cancelled.
+		a.syncSurfaceResumeStateLocked(clearTargets)
+	}
 	contract := control.ResolveFeishuFrontstageActionContract(action)
 	inlineResult, appendEvents := a.synchronousCurrentCardActionResultLocked(action, contract, events)
 	inlineNavigationReplace := inlineResult != nil && contract.CurrentCardMode == control.FeishuFrontstageCurrentCardInlineView
@@ -264,10 +273,6 @@ func (a *App) handleAction(ctx context.Context, action control.Action) *feishu.A
 		a.handleUIEventsLocked(ctx, appendEvents)
 	}
 	a.maybeReplayPendingRequestVisibilityAfterActionLocked(ctx, action)
-	var clearTargets map[string]bool
-	if a.shouldClearSurfaceResumeTargetLocked(action, before) {
-		clearTargets = map[string]bool{strings.TrimSpace(action.SurfaceSessionID): true}
-	}
 	a.syncSurfaceResumeStateLocked(clearTargets)
 	a.syncClaudeWorkspaceProfileStateLocked()
 	a.syncWorkspaceSurfaceContextFilesLocked()

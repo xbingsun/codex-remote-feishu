@@ -48,6 +48,26 @@ func resolveNormalCodexBinaryWithOptions(configPath, configured string, persist 
 		return "", fmt.Errorf("configured codex binary %q is not available in PATH and no usable vscode bundle codex is available", configured)
 	}
 	if !looksLikeVSCodeBundleCodexPath(configured) {
+		if _, err := exec.LookPath(configured); err == nil {
+			return configured, nil
+		}
+		if filepath.IsAbs(configured) {
+			if _, err := exec.LookPath("codex"); err == nil {
+				if persist {
+					persistNormalCodexBinary(configPath, "codex")
+				}
+				log.Printf("wrapper: missing configured codex binary %q self-healed to PATH codex", configured)
+				return "codex", nil
+			}
+			if fallback := firstUsableVSCodeBundleCodex(configured); fallback != "" {
+				if persist {
+					persistNormalCodexBinary(configPath, "codex")
+				}
+				log.Printf("wrapper: missing configured codex binary %q; temporarily using vscode bundle codex %q", configured, fallback)
+				return fallback, nil
+			}
+			return "", fmt.Errorf("configured codex binary %q does not exist and no PATH or vscode bundle codex is available", configured)
+		}
 		return configured, nil
 	}
 

@@ -1,7 +1,8 @@
 # Feishu 卡片 UI 状态机
 
 > Type: `general`
-> Updated: `2026-06-02`
+> Updated: `2026-08-06`
+> Change: 2026-08-06，`/detach` 仍沿用既有 owner / inline-replace / followup-drop 合同；daemon 仅补强产品状态提交顺序，在执行可能释放 ingress 锁的 headless kill 前先清除持久化恢复目标，不改变卡片 callback、freshness 或 replacement 语义。
 > Summary: 当前 live 的 Feishu 卡片 UI 已把 workspace/page/request/review 等 owner-flow 收口到稳定的 page / picker / request substrate；immediate `select_static` callback 的取值规则统一落在 `internal/adapter/feishu/selectflow`，按 `payload value -> form_value[field_name] -> option/options` 恢复，避免群聊回调把旧 option 误当成新选择；`/workspace list` 与 alias `/list` 在工作区已确定后也会把 `新建会话` 作为合法 session 选项，并默认选中它；显式表单提交家族仍保持各自既有 submit 语义。
 
 ## 1. 文档定位
@@ -57,6 +58,7 @@
 - `daemon`
   - 负责 old-card / old-message 生命周期判定
   - 负责在 ingress 层统一把动作交给主 `ApplySurfaceAction()` 入口；`FeishuUIIntent` 分流发生在 service 内，避免绕开 request/path-picker 等产品门禁
+  - 对会取消 pending headless 恢复的 `/detach`，负责在处理动作产生的 daemon kill 前先提交持久化恢复目标清理；这只修正产品状态与副作用的先后顺序，不改变 launcher handoff、inline replace 或卡片 owner
   - 负责只在安全条件下把同上下文导航转成 `ReplaceCurrentCard`
   - 当前统一使用 `FeishuFrontstageActionContract` 判定 replace：
     - `inline_view`：命中 `SupportsFeishuSynchronousCurrentCardReplacement(action)` 且首个事件显式 `InlineReplaceCurrentCard`
@@ -946,7 +948,7 @@ MCP request 卡片当前新增的可视语义：
 - [internal/app/daemon/app_vscode_migration_async_test.go](../../internal/app/daemon/app_vscode_migration_async_test.go)
   - 锁定后台异步 detect 触发的 VS Code 失败/修复 guidance card，后续 `open VS Code` guidance 会复用同一张 tracked guidance card，而不是额外 append 第二张卡
 - [internal/app/daemon/surface_resume_state_test.go](../../internal/app/daemon/surface_resume_state_test.go)
-  - 锁定 detached vscode surface 的 open prompt 在 exact reconnect 后，会继续 patch 回原 guidance card，而不是追加独立“恢复成功”卡
+  - 锁定 detached vscode surface 的 open prompt 在 exact reconnect 后，会继续 patch 回原 guidance card，而不是追加独立“恢复成功”卡；同时锁定 `/detach` 会在终止 pending headless wrapper 前先清除持久化恢复目标，且不改变既有卡片投影合同
 - [internal/core/control/inline_replacement_test.go](../../internal/core/control/inline_replacement_test.go)
   - 锁定 `ResolveFeishuFrontstageActionContract(...)` / `SupportsFeishuSynchronousCurrentCardReplacement(...)` 的当前 frontstage contract：`inline_view`、`first_result_card`、`LauncherDisposition` 分类、lifecycle freshness、以及 legacy bare continuation / submission anchor 已退出 live 路径
 - [internal/app/daemon/app_inbound_lifecycle_test.go](../../internal/app/daemon/app_inbound_lifecycle_test.go)
