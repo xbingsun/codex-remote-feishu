@@ -131,9 +131,9 @@ func RunMainWithArgs(ctx context.Context, args []string, version, branch string)
 		log.Printf("persisted thread catalog disabled: %v", err)
 	} else if catalog != nil {
 		app.service.SetPersistedThreadCatalog(catalog)
-		if catalog.codex != nil {
+		if catalog.codexSQLite != nil {
 			if storage, err := codexstate.NewDefaultTurnPatchStorage(codexstate.TurnPatchStorageOptions{
-				SQLiteCatalog: catalog.codex,
+				SQLiteCatalog: catalog.codexSQLite,
 				Logf:          log.Printf,
 			}); err != nil {
 				log.Printf("turn patch storage disabled: %v", err)

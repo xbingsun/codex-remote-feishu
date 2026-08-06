@@ -346,7 +346,9 @@ func mergeThreadMetadata(currentThread, nextThread *state.ThreadRecord) *state.T
 	if merged == nil {
 		return cloneThreadRecord(secondary)
 	}
-	if strings.TrimSpace(merged.Name) == "" {
+	if preferredName := preferredMergedThreadName(merged, secondary); preferredName != "" {
+		merged.Name = preferredName
+	} else if strings.TrimSpace(merged.Name) == "" {
 		merged.Name = strings.TrimSpace(secondary.Name)
 	}
 	if strings.TrimSpace(merged.Preview) == "" {
@@ -415,6 +417,73 @@ func mergeThreadMetadata(currentThread, nextThread *state.ThreadRecord) *state.T
 	}
 	merged.Archived = merged.Archived || secondary.Archived
 	return merged
+}
+
+func preferredMergedThreadName(primary, secondary *state.ThreadRecord) string {
+	secondaryName := reusableMergedThreadName(secondary)
+	if secondaryName == "" || primary == nil {
+		return ""
+	}
+	primaryName := strings.TrimSpace(primary.Name)
+	if primaryName == "" {
+		return secondaryName
+	}
+	if sameMergedThreadTitleText(primaryName, secondaryName) {
+		return ""
+	}
+	if !threadNameLooksReusableForMerge(primaryName) {
+		return secondaryName
+	}
+	if !secondary.Loaded && strings.TrimSpace(secondary.FirstUserMessage) == "" && strings.TrimSpace(secondary.LastUserMessage) == "" {
+		return secondaryName
+	}
+	if threadNameLooksDerivedFromMessage(primary) && !threadNameLooksDerivedFromMessage(secondary) {
+		return secondaryName
+	}
+	return ""
+}
+
+func reusableMergedThreadName(thread *state.ThreadRecord) string {
+	if thread == nil {
+		return ""
+	}
+	name := strings.TrimSpace(thread.Name)
+	if !threadNameLooksReusableForMerge(name) {
+		return ""
+	}
+	return name
+}
+
+func threadNameLooksReusableForMerge(name string) bool {
+	switch strings.ToLower(normalizeMergedThreadTitleText(name)) {
+	case "", "新会话", "新聊天", "new chat", "new thread", "未命名会话":
+		return false
+	default:
+		return true
+	}
+}
+
+func threadNameLooksDerivedFromMessage(thread *state.ThreadRecord) bool {
+	if thread == nil {
+		return false
+	}
+	name := strings.TrimSpace(thread.Name)
+	if name == "" {
+		return false
+	}
+	return sameMergedThreadTitleText(name, thread.FirstUserMessage) ||
+		sameMergedThreadTitleText(name, thread.LastUserMessage) ||
+		sameMergedThreadTitleText(name, thread.Preview)
+}
+
+func sameMergedThreadTitleText(left, right string) bool {
+	left = normalizeMergedThreadTitleText(left)
+	right = normalizeMergedThreadTitleText(right)
+	return left != "" && left == right
+}
+
+func normalizeMergedThreadTitleText(value string) string {
+	return strings.Join(strings.Fields(strings.TrimSpace(value)), " ")
 }
 
 func cloneThreadRecord(thread *state.ThreadRecord) *state.ThreadRecord {

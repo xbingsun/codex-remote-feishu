@@ -881,6 +881,71 @@ func TestShowThreadsDetachedPrefersPersistedFreshMetadataForVisibleThread(t *tes
 	}
 }
 
+func TestShowThreadsDetachedPrefersPersistedTitleOverMessageLikeOnlineName(t *testing.T) {
+	now := time.Date(2026, 6, 9, 20, 15, 0, 0, time.UTC)
+	svc := newServiceForTest(&now)
+	workspace := "/workspace/260605 eu mixer"
+	firstPrompt := "这是最新版本的code diff，可以配合阅读 tensorboard，帮我看下结构上是否有需要改进的地方"
+	svc.SetPersistedThreadCatalog(&fakePersistedThreadCatalog{
+		recent: []state.ThreadRecord{
+			{
+				ThreadID:   "thread-structure-review",
+				Name:       "审查结构改进",
+				Preview:    "审查结构改进",
+				CWD:        workspace,
+				LastUsedAt: now.Add(-1 * time.Hour),
+			},
+		},
+		byID: map[string]state.ThreadRecord{
+			"thread-structure-review": {
+				ThreadID:   "thread-structure-review",
+				Name:       "审查结构改进",
+				Preview:    "审查结构改进",
+				CWD:        workspace,
+				LastUsedAt: now.Add(-1 * time.Hour),
+			},
+		},
+	})
+	svc.UpsertInstance(&state.InstanceRecord{
+		InstanceID:    "inst-1",
+		DisplayName:   "260605 eu mixer",
+		WorkspaceRoot: workspace,
+		WorkspaceKey:  workspace,
+		ShortName:     "260605 eu mixer",
+		Online:        true,
+		Threads: map[string]*state.ThreadRecord{
+			"thread-structure-review": {
+				ThreadID:         "thread-structure-review",
+				Name:             firstPrompt,
+				Preview:          firstPrompt,
+				FirstUserMessage: firstPrompt,
+				CWD:              workspace,
+				Loaded:           true,
+				LastUsedAt:       now,
+			},
+		},
+	})
+
+	events := svc.ApplySurfaceAction(control.Action{
+		Kind:             control.ActionShowThreads,
+		SurfaceSessionID: "surface-1",
+		ChatID:           "chat-1",
+		ActorUserID:      "user-1",
+	})
+
+	if len(events) != 1 {
+		t.Fatalf("expected target picker, got %#v", events)
+	}
+	view := targetPickerFromEvent(t, events[0])
+	option, ok := targetPickerSessionOption(view, targetPickerThreadValue("thread-structure-review"))
+	if !ok {
+		t.Fatalf("expected structure review thread option, got %#v", view.SessionOptions)
+	}
+	if option.Label != "260605 eu mixer · 审查结构改进" {
+		t.Fatalf("expected picker to use persisted thread title, got %#v", option)
+	}
+}
+
 func TestPresentGlobalThreadSelectionMarksBusyThreadDisabled(t *testing.T) {
 	now := time.Date(2026, 4, 7, 18, 10, 0, 0, time.UTC)
 	svc := newServiceForTest(&now)
