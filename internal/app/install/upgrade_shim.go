@@ -1,3 +1,5 @@
+//go:build !upgrade_shim
+
 package install
 
 import (

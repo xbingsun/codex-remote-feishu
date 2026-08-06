@@ -12,7 +12,21 @@ import (
 	"github.com/kxn/codex-remote-feishu/internal/execlaunch"
 )
 
-var launchctlUserRunner = runLaunchctl
+const launchdUserBootstrapRetryLimit = 40
+
+var (
+	launchctlUserRunner      = runLaunchctl
+	launchdUserBootstrapWait = func(ctx context.Context) error {
+		timer := time.NewTimer(250 * time.Millisecond)
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-timer.C:
+			return nil
+		}
+	}
+)
 
 func runLaunchctl(ctx context.Context, args ...string) (string, error) {
 	cmd := execlaunch.CommandContext(ctx, "launchctl", args...)
@@ -58,6 +72,14 @@ func isLaunchdMissingErr(err error) bool {
 	return strings.Contains(text, "could not find") ||
 		strings.Contains(text, "no such process") ||
 		strings.Contains(text, "service is not loaded")
+}
+
+func isLaunchdBootstrapTransitionErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	text := strings.ToLower(strings.TrimSpace(err.Error()))
+	return strings.Contains(text, "bootstrap failed") && strings.Contains(text, "input/output error")
 }
 
 func launchdUserServiceState(state InstallState) (InstallState, error) {
@@ -179,9 +201,17 @@ func launchdUserBootstrap(ctx context.Context, state InstallState) error {
 	if err != nil {
 		return err
 	}
-	_, err = launchctlUserRunner(ctx, "bootstrap", launchdUserGUITarget(), state.ServiceUnitPath)
-	if isLaunchdAlreadyLoadedErr(err) {
-		return nil
+	for attempt := 0; attempt < launchdUserBootstrapRetryLimit; attempt++ {
+		_, err = launchctlUserRunner(ctx, "bootstrap", launchdUserGUITarget(), state.ServiceUnitPath)
+		if err == nil || isLaunchdAlreadyLoadedErr(err) {
+			return nil
+		}
+		if !isLaunchdBootstrapTransitionErr(err) || attempt == launchdUserBootstrapRetryLimit-1 {
+			return err
+		}
+		if waitErr := launchdUserBootstrapWait(ctx); waitErr != nil {
+			return fmt.Errorf("wait for launchd bootstrap transition after %w: %v", err, waitErr)
+		}
 	}
 	return err
 }

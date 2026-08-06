@@ -22,19 +22,37 @@ generated_go="${PACKAGE_DIR}/upgrade_shim_${GOOS_VALUE}_${GOARCH_VALUE}_embed.go
 generated_go_tmp="${generated_go}.tmp.$$"
 compressed_path="${ASSET_DIR}/${asset_name}.zst"
 
+tmp_dir="$(mktemp -d)"
+cleanup() {
+  rm -rf "${tmp_dir}"
+  rm -f "${generated_go_tmp}"
+}
+trap cleanup EXIT
+
+dependency_dirs_path="${tmp_dir}/dependency-dirs"
+dependency_files_path="${tmp_dir}/dependency-files"
+CGO_ENABLED=0 GOOS="${GOOS_VALUE}" GOARCH="${GOARCH_VALUE}" \
+  go list -tags upgrade_shim -deps -f '{{if not .Standard}}{{.Dir}}{{end}}' ./cmd/upgrade-shim |
+  sort -u > "${dependency_dirs_path}"
+while IFS= read -r package_dir; do
+  case "${package_dir}" in
+    "${ROOT_DIR}"|"${ROOT_DIR}"/*)
+      find "${package_dir}" -maxdepth 1 -type f -name '*.go' ! -name '*_test.go' -print0
+      ;;
+  esac
+done < "${dependency_dirs_path}" | sort -z > "${dependency_files_path}"
+
 source_digest="$(
   {
     printf 'goversion=%s\n' "$(go env GOVERSION)"
+    printf 'buildtags=upgrade_shim\n'
     printf 'script=%s\n' "$(checksum_first_field "${SCRIPT_PATH}")"
+    printf 'go.mod=%s\n' "$(checksum_first_field "${ROOT_DIR}/go.mod")"
+    printf 'go.sum=%s\n' "$(checksum_first_field "${ROOT_DIR}/go.sum")"
     while IFS= read -r -d '' file; do
-      printf '%s  %s\n' "$(checksum_first_field "${file}")" "${file}"
-    done < <(
-      find "${ROOT_DIR}/cmd/upgrade-shim" "${ROOT_DIR}/internal/app/upgradeshim" "${ROOT_DIR}/internal/upgradeshim" \
-        -type f -name '*.go' \
-        ! -path "${ROOT_DIR}/internal/upgradeshim/embed/*" \
-        -print0 |
-        sort -z
-    )
+      relative_path="${file#"${ROOT_DIR}/"}"
+      printf '%s  %s\n' "$(checksum_first_field "${file}")" "${relative_path}"
+    done < "${dependency_files_path}"
   } | "${checksum_cmd[@]}" | awk '{print $1}'
 )"
 
@@ -48,20 +66,13 @@ if ! command -v zstd >/dev/null 2>&1; then
   exit 1
 fi
 
-tmp_dir="$(mktemp -d)"
-cleanup() {
-  rm -rf "${tmp_dir}"
-  rm -f "${generated_go_tmp}"
-}
-trap cleanup EXIT
-
 binary_path="${tmp_dir}/${asset_name}"
 if [[ "${GOOS_VALUE}" == "windows" ]]; then
   binary_path="${binary_path}.exe"
 fi
 
 CGO_ENABLED=0 GOOS="${GOOS_VALUE}" GOARCH="${GOARCH_VALUE}" \
-  go build -trimpath -ldflags "-s -w" -o "${binary_path}" ./cmd/upgrade-shim
+  go build -tags upgrade_shim -trimpath -ldflags "-s -w" -o "${binary_path}" ./cmd/upgrade-shim
 
 binary_sha256="$(checksum_first_field "${binary_path}")"
 

@@ -23,6 +23,74 @@ func withMockLaunchctl(t *testing.T, fn func(ctx context.Context, args ...string
 	return func() { launchctlUserRunner = originalRunner }
 }
 
+func withMockLaunchdBootstrapWait(t *testing.T, fn func(context.Context) error) func() {
+	originalWait := launchdUserBootstrapWait
+	launchdUserBootstrapWait = fn
+	return func() { launchdUserBootstrapWait = originalWait }
+}
+
+func TestLaunchdUserBootstrapRetriesTransitionInputOutputError(t *testing.T) {
+	defer withDarwinGOOS(t)()
+	baseDir := t.TempDir()
+	stubServiceUserHome(t, baseDir)
+	state := InstallState{InstanceID: "stable", BaseDir: baseDir}
+	ApplyStateMetadata(&state, StateMetadataOptions{
+		InstanceID:     state.InstanceID,
+		BaseDir:        state.BaseDir,
+		ServiceManager: ServiceManagerLaunchdUser,
+	})
+
+	attempts := 0
+	defer withMockLaunchctl(t, func(_ context.Context, args ...string) (string, error) {
+		attempts++
+		if attempts < 3 {
+			return "Bootstrap failed: 5: Input/output error", fmt.Errorf("exit status 5: Bootstrap failed: 5: Input/output error")
+		}
+		return "", nil
+	})()
+	waits := 0
+	defer withMockLaunchdBootstrapWait(t, func(context.Context) error {
+		waits++
+		return nil
+	})()
+
+	if err := launchdUserBootstrap(context.Background(), state); err != nil {
+		t.Fatalf("launchdUserBootstrap: %v", err)
+	}
+	if attempts != 3 || waits != 2 {
+		t.Fatalf("attempts=%d waits=%d, want attempts=3 waits=2", attempts, waits)
+	}
+}
+
+func TestLaunchdUserBootstrapDoesNotRetryPermanentFailure(t *testing.T) {
+	defer withDarwinGOOS(t)()
+	baseDir := t.TempDir()
+	stubServiceUserHome(t, baseDir)
+	state := InstallState{InstanceID: "stable", BaseDir: baseDir}
+	ApplyStateMetadata(&state, StateMetadataOptions{
+		InstanceID:     state.InstanceID,
+		BaseDir:        state.BaseDir,
+		ServiceManager: ServiceManagerLaunchdUser,
+	})
+
+	attempts := 0
+	defer withMockLaunchctl(t, func(_ context.Context, args ...string) (string, error) {
+		attempts++
+		return "Bootstrap failed: 5: Permission denied", fmt.Errorf("exit status 5: Bootstrap failed: 5: Permission denied")
+	})()
+	defer withMockLaunchdBootstrapWait(t, func(context.Context) error {
+		t.Fatal("permanent launchd failure must not wait or retry")
+		return nil
+	})()
+
+	if err := launchdUserBootstrap(context.Background(), state); err == nil {
+		t.Fatal("expected launchdUserBootstrap to fail")
+	}
+	if attempts != 1 {
+		t.Fatalf("attempts=%d, want 1", attempts)
+	}
+}
+
 func TestParseServiceManagerRejectsLaunchdUserOutsideDarwin(t *testing.T) {
 	tests := []string{"linux", "windows"}
 	for _, goos := range tests {

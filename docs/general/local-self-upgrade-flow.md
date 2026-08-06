@@ -1,8 +1,8 @@
 # 本地自升级流程
 
 > Type: `general`
-> Updated: `2026-04-27`
-> Summary: 说明 repo 构建产物触发本地自升级时的完整时序、内嵌 upgrade shim 的释放与启动方式、与 `/upgrade dev` 的边界、自动回滚规则，以及 repo install target 与当前 daemon self target 的语义边界。
+> Updated: `2026-08-06`
+> Summary: 说明 repo 构建产物触发本地自升级时的完整时序、内嵌 upgrade shim 的释放与启动方式、与 `/upgrade dev` 的边界、自动回滚规则，以及 repo install target 与当前 daemon self target 的语义边界；补充 launchd 异步卸载后的有界 bootstrap 重试，以及 helper 依赖闭包驱动、禁止递归嵌入自身资产的生成合同。
 
 ## 1. 这份文档回答什么问题
 
@@ -287,6 +287,8 @@ helper shim 入口是一个独立 binary，本身不再接受 `upgrade-helper -s
 4. 把 `PendingUpgrade.TargetBinaryPath` 复制覆盖到 `CurrentBinaryPath`
 5. 把 phase 改成 `observing`
 6. 用新的 live binary 重新启动 daemon/service
+   - macOS `launchd_user` 在 `bootout` 后可能已经查不到 service label，但内部卸载仍处于过渡窗口；此时 `bootstrap` 会短暂返回 `Bootstrap failed: 5: Input/output error`
+   - 当前只对这一个明确的 launchd 过渡错误做最多 10 秒的有界重试；权限、plist 或其他永久错误仍立即失败并进入回滚
 7. 轮询健康状态，直到成功或超时
 8. 成功后把 install-state 更新为：
    - `CurrentVersion = TargetVersion`
@@ -352,7 +354,7 @@ helper shim 入口是一个独立 binary，本身不再接受 `upgrade-helper -s
 ### 10.3 helper 不再来自“当前执行 `local-upgrade` 的 binary 副本”
 
 当前实现里，主 binary 只负责携带并释放内嵌 shim 资产。  
-是否更新 shim，不由普通业务发版直接驱动；只有 shim 本身或 sidecar schema 发生变化时，才需要重新准备对应平台的嵌入资产。
+shim 资产通过专用 `upgrade_shim` build tag 编译：独立 helper 不会再次嵌入“用于释放 helper 的资产”，避免递归膨胀。生成脚本会按目标平台解析 `cmd/upgrade-shim` 的完整仓库内 Go 依赖闭包，并使用仓库相对路径、Go 版本、`go.mod` 与 `go.sum` 计算稳定摘要；任一真实运行依赖变化都会重建 shim，而仅仅更换仓库绝对路径不会触发无意义重建。
 
 ### 10.4 `systemd_user` 下 helper 不是原 service 的一部分
 
