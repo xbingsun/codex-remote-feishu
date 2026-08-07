@@ -1,10 +1,12 @@
 # Codex Remote Feishu
 
-## 版本说明
+## 项目状态
 
-本项目 v0 版本参考并基于 [kxn/codex-remote-feishu](https://github.com/kxn/codex-remote-feishu)。
+这是 [xbingsun/codex-remote-feishu](https://github.com/xbingsun/codex-remote-feishu) 的当前维护版，活跃开发分支为 `main`。项目基于上游 [kxn/codex-remote-feishu](https://github.com/kxn/codex-remote-feishu) 持续演进，已不再是最初的 v0/v1 说明版。
 
-v1 在 v0 的基础上增加了 bot 读取飞书云文档评论的能力：在云文档评论里 @ bot 后，bot 会读取对应评论线程上下文，把请求送入 Codex，并将最终答复回复回同一条评论线程。
+当前维护版包含飞书会话接管与恢复、WebSetup、云文档评论 @ 机器人、文件与图片传递、定时任务、升级与恢复流程等能力，具体以下方功能列表和 [变更记录](./CHANGELOG.md) 为准。
+
+> 发布说明：当前仓库尚未发布自己的正式 SemVer Release。下方一键安装命令使用本仓库 `main` 分支的安装器入口，但仍从上游仓库下载正式发布包。要运行本仓库的最新代码，请使用后文的 [仓库内联调入口](#仓库内联调入口)。
 
 `codex-remote-feishu` 把一台机器上的 Codex 工作现场带到飞书，让你可以在飞书里接管工作区、切换 thread、继续对话、发图和停止当前 turn。
 
@@ -19,7 +21,7 @@ v1 在 v0 的基础上增加了 bot 读取飞书云文档评论的能力：在�
 
 ## 组件
 
-当前 release 只发布一个统一二进制：
+上游正式 release 只发布一个统一二进制：
 
 - `codex-remote`
   - `daemon` role
@@ -32,7 +34,7 @@ v1 在 v0 的基础上增加了 bot 读取飞书云文档评论的能力：在�
     - 引导安装器
     - 负责安装稳定二进制、写统一配置并启动 WebSetup
 
-当前官方发布模型是：
+上游正式发布模型是：
 
 - GitHub Releases 的平台包内只放最终用户需要的运行资产
   - `codex-remote` / `codex-remote.exe`
@@ -82,18 +84,20 @@ v1 在 v0 的基础上增加了 bot 读取飞书云文档评论的能力：在�
 
 关于飞书应用的具体配置项，可参考仓库中的飞书配置模板 [`deploy/feishu/app-template.json`](./deploy/feishu/app-template.json) 和配置说明 [`deploy/feishu/README.md`](./deploy/feishu/README.md)。这些是 WebSetup 的参考资源，方便你了解机器人菜单、事件订阅和权限配置的具体内容，无需在安装前手动准备。
 
-## 一条命令安装
+## 一条命令安装上游正式版
 
 macOS / Linux：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/kxn/codex-remote-feishu/master/install-release.sh | bash
+curl -fsSL https://raw.githubusercontent.com/xbingsun/codex-remote-feishu/main/install-release.sh |
+  bash -s -- --repo kxn/codex-remote-feishu
 ```
 
 Windows PowerShell：
 
 ```powershell
-irm https://raw.githubusercontent.com/kxn/codex-remote-feishu/master/install-release.ps1 | iex
+$installer = irm https://raw.githubusercontent.com/xbingsun/codex-remote-feishu/main/install-release.ps1
+& ([scriptblock]::Create($installer)) -Repo 'kxn/codex-remote-feishu'
 ```
 
 这个脚本会自动：
@@ -108,21 +112,25 @@ irm https://raw.githubusercontent.com/kxn/codex-remote-feishu/master/install-rel
 如果要安装某个 prerelease track 的最新版本：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/kxn/codex-remote-feishu/master/install-release.sh | bash -s -- --track beta
+curl -fsSL https://raw.githubusercontent.com/xbingsun/codex-remote-feishu/main/install-release.sh |
+  bash -s -- --repo kxn/codex-remote-feishu --track beta
 ```
 
 ```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/kxn/codex-remote-feishu/master/install-release.ps1))) -Track beta
+$installer = irm https://raw.githubusercontent.com/xbingsun/codex-remote-feishu/main/install-release.ps1
+& ([scriptblock]::Create($installer)) -Repo 'kxn/codex-remote-feishu' -Track beta
 ```
 
 如果要安装指定版本：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/kxn/codex-remote-feishu/master/install-release.sh | bash -s -- --version v1.0.0
+curl -fsSL https://raw.githubusercontent.com/xbingsun/codex-remote-feishu/main/install-release.sh |
+  bash -s -- --repo kxn/codex-remote-feishu --version v1.0.0
 ```
 
 ```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/kxn/codex-remote-feishu/master/install-release.ps1))) -Version <version>
+$installer = irm https://raw.githubusercontent.com/xbingsun/codex-remote-feishu/main/install-release.ps1
+& ([scriptblock]::Create($installer)) -Repo 'kxn/codex-remote-feishu' -Version <version>
 ```
 
 ## 手动安装 release 包
