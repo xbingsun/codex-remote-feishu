@@ -96,7 +96,11 @@ fi
 if [[ "${BASE_DIR_SET}" == "1" ]]; then
   resolver_args+=("--base-dir" "${BASE_DIR}")
 fi
-eval "$("${REPO_TARGET_SCRIPT}" --format shell "${resolver_args[@]}")"
+if [[ ${#resolver_args[@]} -gt 0 ]]; then
+  eval "$("${REPO_TARGET_SCRIPT}" --format shell "${resolver_args[@]}")"
+else
+  eval "$("${REPO_TARGET_SCRIPT}" --format shell)"
+fi
 
 printf 'target instance: %s\n' "${CODEX_REMOTE_TARGET_INSTANCE_ID}"
 printf 'target state: %s\n' "${CODEX_REMOTE_TARGET_STATE_PATH}"

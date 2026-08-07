@@ -90,7 +90,11 @@ if [[ "${BASE_DIR_SET}" == "1" ]]; then
   resolver_args+=("--base-dir" "${BASE_DIR}")
 fi
 
-eval "$("${TARGET_SCRIPT}" --format shell "${resolver_args[@]}")"
+if [[ ${#resolver_args[@]} -gt 0 ]]; then
+  eval "$("${TARGET_SCRIPT}" --format shell "${resolver_args[@]}")"
+else
+  eval "$("${TARGET_SCRIPT}" --format shell)"
+fi
 
 case "${target_kind}" in
   admin)
