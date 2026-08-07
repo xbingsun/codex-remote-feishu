@@ -239,6 +239,14 @@ func renderFinalCardMarkdownInline(text string) string {
 			i = close + run
 			continue
 		}
+		if text[i] == '!' && i+1 < len(text) && text[i+1] == '[' {
+			end, label, target, ok := parseMarkdownLinkAt(text, i+1)
+			if ok {
+				out.WriteString(renderSafeFinalMarkdownImageFallback(label, target))
+				i = end
+				continue
+			}
+		}
 		if text[i] == '[' {
 			end, label, target, ok := parseMarkdownLinkAt(text, i)
 			if ok && shouldNeutralizeFinalMarkdownTarget(target) {
@@ -290,12 +298,24 @@ func parseMarkdownLinkAt(text string, start int) (end int, label, target string,
 	if labelEnd+1 >= len(text) || text[labelEnd+1] != '(' {
 		return 0, "", "", false
 	}
-	targetEnd := strings.IndexByte(text[labelEnd+2:], ')')
-	if targetEnd < 0 {
-		return 0, "", "", false
+	targetStart := labelEnd + 2
+	depth := 0
+	for i := targetStart; i < len(text); i++ {
+		switch text[i] {
+		case '\\':
+			if i+1 < len(text) {
+				i++
+			}
+		case '(':
+			depth++
+		case ')':
+			if depth == 0 {
+				return i + 1, text[start+1 : labelEnd], text[targetStart:i], true
+			}
+			depth--
+		}
 	}
-	targetEnd += labelEnd + 2
-	return targetEnd + 1, text[start+1 : labelEnd], text[labelEnd+2 : targetEnd], true
+	return 0, "", "", false
 }
 
 func shouldNeutralizeFinalMarkdownTarget(target string) bool {
@@ -330,6 +350,18 @@ func renderNeutralizedLocalMarkdownLink(label, target string) string {
 	default:
 		return label + " (" + targetLiteral + ")"
 	}
+}
+
+func renderSafeFinalMarkdownImageFallback(label, target string) string {
+	if shouldNeutralizeFinalMarkdownTarget(target) {
+		return renderNeutralizedLocalMarkdownLink(label, target)
+	}
+	label = strings.TrimSpace(label)
+	target = strings.TrimSpace(target)
+	if label == "" {
+		return target
+	}
+	return "[" + label + "](" + target + ")"
 }
 
 func markdownCodeSpan(text string) string {

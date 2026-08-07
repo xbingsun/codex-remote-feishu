@@ -435,6 +435,9 @@ func (p *Projector) projectBlock(gatewayID, surfaceSessionID, chatID, sourceMess
 		body = fenced(block.Language, block.Text)
 	}
 	elements := p.finalBlockExtraElements(summary, turnDiffPreview, finalSummary)
+	if strings.TrimSpace(body) == "" && len(elements) == 0 {
+		return nil
+	}
 	title := finalCardTitle(sourceMessagePreview, block.KeepDefaultTitle)
 	return projectFinalReplyCards(gatewayID, surfaceSessionID, chatID, sourceMessageID, title, temporarySessionHeaderSubtitle(block.TemporarySessionLabel), body, elements)
 }

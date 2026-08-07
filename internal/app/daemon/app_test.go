@@ -59,9 +59,10 @@ func (g *flakyGateway) Apply(_ context.Context, operations []feishu.Operation) e
 }
 
 type stubMarkdownPreviewer struct {
-	requests []previewpkg.FinalBlockPreviewRequest
-	text     string
-	err      error
+	requests   []previewpkg.FinalBlockPreviewRequest
+	text       string
+	imagePaths []string
+	err        error
 }
 
 func (s *stubMarkdownPreviewer) RewriteFinalBlock(_ context.Context, req previewpkg.FinalBlockPreviewRequest) (previewpkg.FinalBlockPreviewResult, error) {
@@ -70,7 +71,10 @@ func (s *stubMarkdownPreviewer) RewriteFinalBlock(_ context.Context, req preview
 	if s.text != "" {
 		block.Text = s.text
 	}
-	return previewpkg.FinalBlockPreviewResult{Block: block}, s.err
+	return previewpkg.FinalBlockPreviewResult{
+		Block:      block,
+		ImagePaths: append([]string(nil), s.imagePaths...),
+	}, s.err
 }
 
 type timeoutMarkdownPreviewer struct {

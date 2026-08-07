@@ -32,6 +32,7 @@ func (p *DriveMarkdownPreviewer) RewriteFinalBlock(ctx context.Context, req Fina
 
 	runtime := &previewRewriteRuntime{}
 	rewritten, changed, dirty, rewriteErr := p.rewriteMarkdownLinks(ctx, req, principals, runtime)
+	result.ImagePaths = append([]string(nil), runtime.imagePaths...)
 	if changed {
 		result.Block.Text = rewritten
 	}
@@ -286,6 +287,27 @@ func (p *DriveMarkdownPreviewer) rewriteMarkdownLinksPlain(
 	)
 	last := 0
 	for i := 0; i < len(text); {
+		if text[i] == '!' && i+1 < len(text) && text[i+1] == '[' {
+			end, label, rawTarget, ok := parseMarkdownLinkAt(text, i+1)
+			if ok {
+				builder.WriteString(text[last:i])
+				resolvedPath, resolved, resolveErr := p.resolveLocalMarkdownImagePath(rawTarget, req)
+				switch {
+				case resolveErr != nil:
+					errs = append(errs, resolveErr.Error())
+					builder.WriteString(renderPreviewImageFallback(label, rawTarget))
+				case resolved && runtime.addFinalImagePath(resolvedPath):
+					// The image is returned through the structured image lane instead of
+					// leaking a local path or URL into Feishu card markdown.
+				default:
+					builder.WriteString(renderPreviewImageFallback(label, rawTarget))
+				}
+				changed = true
+				i = end
+				last = i
+				continue
+			}
+		}
 		if text[i] == '[' {
 			end, label, rawTarget, ok := parseMarkdownLinkAt(text, i)
 			if ok {
@@ -938,43 +960,4 @@ func (p *DriveMarkdownPreviewer) ensureRootFolder(ctx context.Context, runtime *
 	}
 	root, _ := value.(*previewFolderRecord)
 	return root, nil
-}
-
-func (p *DriveMarkdownPreviewer) resolvePreviewPath(rawTarget string, req MarkdownPreviewRequest) (string, bool, error) {
-	target, ok := normalizePreviewReferenceTarget(rawTarget)
-	if !ok {
-		return "", false, nil
-	}
-
-	cleanTarget, _, _ := splitPreviewLocationSuffix(target)
-	if _, _, ok := previewArtifactMetadata(cleanTarget); !ok {
-		return "", false, nil
-	}
-
-	roots := previewAllowedRoots(req.ThreadCWD, req.WorkspaceRoot, p.config.ProcessCWD)
-	candidates := previewPathCandidates(cleanTarget, roots)
-	for _, candidate := range candidates {
-		resolved, err := previewCanonicalPath(candidate)
-		if err != nil {
-			if os.IsNotExist(err) {
-				continue
-			}
-			return "", true, err
-		}
-		if !previewPathWithinAnyRoot(resolved, roots) {
-			continue
-		}
-		info, err := os.Stat(resolved)
-		if err != nil {
-			if os.IsNotExist(err) {
-				continue
-			}
-			return "", true, err
-		}
-		if info.IsDir() {
-			continue
-		}
-		return resolved, true, nil
-	}
-	return "", false, nil
 }

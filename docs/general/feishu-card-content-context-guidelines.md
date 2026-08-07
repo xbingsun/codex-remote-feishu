@@ -1,7 +1,7 @@
 # Feishu Card Content Context Guidelines
 
 > Type: `general`
-> Updated: `2026-04-21`
+> Updated: `2026-08-07`
 > Summary: 补充“需求描述 -> 分层落点 -> Markdown 处理”的决策规范，明确这类代码应把格式职责放在 adapter 最后一跳渲染。
 
 ## 1. 文档定位
@@ -264,6 +264,18 @@ final reply 当前有专门的 markdown normalize 与 preview rewrite 链路。
 3. 由 projector 重新生成最终 markdown / `plain_text`
 
 换句话说，默认是“降级为结构后重投影”，不是“继续在字符串里猜和修”。
+
+### 7.5 final reply 图片必须走结构化图片通道
+
+final reply 中的 Markdown 图片语法不能原样进入飞书卡片 `lark_md`。本地路径、localhost 预览地址和普通远程 URL 都不是飞书 `image_key`，把它们放进图片语法会导致整张卡片发送失败。
+
+默认处理规则：
+
+- 预览层只解析当前工作区、线程目录或受控进程目录内的本地图片，并返回结构化图片路径
+- projector 只消费已经校验过的结构化路径，使用独立图片消息上传，不把路径重新拼回卡片 markdown
+- 工作区外、缺失、远程、重复或超量图片必须安全降级为普通链接或文本
+- adapter 最后一跳仍需兜底清除残留的 `![...](...)`，避免任何未识别目标被飞书解释为 `image_key`
+- 图片发送数量必须有显式上限；当前 final reply 上限为 4 张，避免单次回复制造无界消息和上传请求
 
 ## 8. 面向需求描述的实现规则
 

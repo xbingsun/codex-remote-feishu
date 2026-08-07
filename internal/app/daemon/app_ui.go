@@ -173,9 +173,10 @@ func (a *App) deliverUIEventWithContextMode(ctx context.Context, event eventcont
 	}
 	log.Printf("ui event: surface=%s chat=%s actor=%s kind=%s", event.SurfaceSessionID, chatID, actorUserID, event.Kind)
 	var (
-		previewReq previewpkg.FinalBlockPreviewRequest
-		previewErr error
-		didPreview bool
+		previewReq      previewpkg.FinalBlockPreviewRequest
+		previewErr      error
+		didPreview      bool
+		finalImagePaths []string
 	)
 	if a.finalBlockPreviewer != nil && event.Kind == eventcontract.KindBlockCommitted && event.Block != nil {
 		previewCtx, previewCancel := a.newTimeoutContext(ctx, a.finalPreviewTimeout)
@@ -206,6 +207,7 @@ func (a *App) deliverUIEventWithContextMode(ctx context.Context, event eventcont
 		previewErr = err
 		event.Block = &previewResult.Block
 		event.TurnDiffPreview = previewResult.TurnDiffPreview
+		finalImagePaths = append([]string(nil), previewResult.ImagePaths...)
 		if err != nil {
 			log.Printf(
 				"final block preview rewrite failed (continuing without preview rewrite): surface=%s instance=%s thread=%s item=%s err=%v",
@@ -226,6 +228,7 @@ func (a *App) deliverUIEventWithContextMode(ctx context.Context, event eventcont
 	event.Payload = nil
 	event = event.Normalized()
 	operations := a.projector.ProjectEvent(chatID, event)
+	operations = append(operations, a.projector.ProjectFinalImagePaths(chatID, event, finalImagePaths)...)
 	operations = a.decorateReviewOperationsLocked(event, operations)
 	for i := range operations {
 		if operations[i].GatewayID == "" {

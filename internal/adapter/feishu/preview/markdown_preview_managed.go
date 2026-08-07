@@ -12,7 +12,9 @@ import (
 )
 
 type previewRewriteRuntime struct {
-	dirty bool
+	dirty      bool
+	imagePaths []string
+	imageSeen  map[string]bool
 }
 
 type previewManagedCleanupCandidate struct {

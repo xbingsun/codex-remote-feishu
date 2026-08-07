@@ -31,6 +31,7 @@ type FinalBlockPreviewRequest struct {
 type FinalBlockPreviewResult struct {
 	Block           render.Block
 	TurnDiffPreview *control.TurnDiffPreview
+	ImagePaths      []string
 }
 
 type PreviewLocation struct {
